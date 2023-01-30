@@ -1,0 +1,49 @@
+main:
+  params: [event]
+  steps:
+  - init:
+      assign:
+      - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+      - event_bucket: ${event.data.bucket}
+      - event_object: ${event.data.name}
+      - event_type: ${event.type}
+      - regexp: "data/.*\\.json"
+      - df_name: ${text.replace_all(event_object,"/","_") + "-" + sys.now()}
+      - df_region: us-central1
+      - df_transfrom_func: transform
+      - df_transfrom_js: transform-json.js
+      - df_network: default
+      - df_subnetwork: default
+      - df_temp_bucket: gcp-expert-sandbox-allen-temp
+      - bq_table: gcp-expert-sandbox-allen:dataset.table-demo
+      - bq_schema: schema.json
+  - dataflow:
+      switch:
+        - condition: ${text.match_regex(event_object,regexp)}
+          steps:
+          - creating_job:
+              call: googleapis.dataflow.v1b3.projects.templates.create
+              args:
+                projectId: ${project_id}
+                body: 
+                  environment:
+                    network: ${df_network}
+                    subnetwork: ${"regions/" + df_region + "/subnetworks/" + df_subnetwork}
+                    tempLocation: ${"gs://" + df_temp_bucket + "/temp"}
+                  gcsPath: gs://dataflow-templates/latest/GCS_Text_to_BigQuery
+                  jobName: ${df_name}
+                  location: ${df_region}
+                  parameters: 
+                    javascriptTextTransformFunctionName: ${df_transfrom_func}
+                    javascriptTextTransformGcsPath: ${"gs://" + event_bucket + "/" + df_transfrom_js}
+                    JSONPath: ${"gs://" + event_bucket + "/" + bq_schema}
+                    inputFilePattern: ${"gs://" + event_bucket + "/" + event_object}
+                    outputTable: ${bq_table}
+                    bigQueryLoadingTemporaryDirectory: ${"gs://" + df_temp_bucket + "/temp"}
+              result: createResult
+          - job_completed:
+              return: ${createResult}
+  - not_creating_job:
+      raise:
+        code: 100
+        message: ${"gs://" + event_bucket + "/" + event_object + " is not expect"}

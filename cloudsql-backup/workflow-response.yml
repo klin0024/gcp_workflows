@@ -1,0 +1,129 @@
+---
+main:
+  params: [event]
+  steps:
+  - init:
+      assign:
+      - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+      - instances: ${event.instances}
+      - retain_days: ${event.retainDays}
+      - current_unix_time: ${sys.now()}
+      - expiration_unix_time: ${current_unix_time - (retain_days * 86400)}
+      - response:
+          success: []
+          fail: []
+  - for_each_instances:
+      for:
+        value: instance
+        in: ${instances}
+        steps:
+        - get_sql_name:
+            assign:
+              - sql_name: ${instance.name}
+        - backup:
+            try:
+              steps:
+              - process:
+                  call: backup_sql_workflow
+                  args:
+                    project_id: ${project_id}
+                    instance: ${instance}
+              - success:
+                  assign:
+                  - response.success: ${list.prepend(response.success, sql_name)} 
+            except:
+              as: e
+              steps:
+              - known_errors:
+                  switch:
+                  - condition: ${e.code == 404}
+                    steps:
+                    - print_not_exists:
+                        call: sys.log
+                        args:
+                          text: ${sql_name + " Not Found"}
+                          severity: "ERROR"
+                    - not_exists:
+                        assign:
+                        - response.fail: ${list.prepend(response.fail, sql_name)}
+                  - condition: true
+                    steps:
+                    - print_error:  
+                        call: sys.log
+                        args:
+                          json: ${e}
+                          severity: "ERROR"
+                    - failed:
+                        assign:
+                        - response.fail: ${list.prepend(response.fail, sql_name)}
+              - next_instance:
+                  next: continue
+        - expiration:
+            call: expiration_backup_workflow
+            args:
+              project_id: ${project_id}
+              instance: ${instance}
+              expiration_unix_time: ${expiration_unix_time}
+  - job_completed:
+      switch:
+        - condition: ${len(response.fail) == 0}
+          return: ${response}  
+        - condition: true
+          raise:
+            code: 1
+            message: ${response}
+      
+backup_sql_workflow:
+  params: [project_id,instance]
+  steps:
+  - init:
+      assign:
+        - sql_name: ${instance.name} 
+        - location: ${instance.location}
+  - create_sql_backup:
+      call: googleapis.sqladmin.v1.backupRuns.insert
+      args:
+        instance: ${sql_name}
+        project: ${project_id}
+        body: 
+          location: ${location}
+      result: insertResult    
+  - print_log:
+      call: sys.log
+      args:
+        json: ${insertResult}
+        severity: "NOTICE"
+
+expiration_backup_workflow:
+  params: [project_id,instance,expiration_unix_time]
+  steps:
+  - init:
+      assign:
+        - sql_name: ${instance.name}
+  - get_expiration_backup:
+      call: googleapis.sqladmin.v1.backupRuns.list
+      args:
+        instance: ${sql_name}
+        project: ${project_id}
+      result: listResult
+  - for_each_backups:
+      for:
+        value: backup
+        in: ${listResult.items}
+        steps:
+        - filter_backup:
+            switch:
+            - condition: ${backup.type == "ON_DEMAND" AND time.parse(backup.endTime) < expiration_unix_time}
+              steps:
+              - delete_backup:
+                  call: googleapis.sqladmin.v1.backupRuns.delete
+                  args:
+                    id: ${backup.id}
+                    instance: ${sql_name}
+                    project: ${project_id}
+                  result: deleteResult
+              - print_log:  
+                  call: sys.log
+                  args:
+                    json: ${deleteResult}
+                    severity: "NOTICE"

@@ -1,0 +1,15 @@
+{
+	"instances":[
+		{
+			"name": "admin-ws",
+			"zone": "us-central1-a",
+			"location": "us"
+		},
+		{
+			"name": "test-1",
+			"zone": "us-central1-f",
+			"location": "us-central1"
+		}
+	],
+	"retainDays": 7
+}

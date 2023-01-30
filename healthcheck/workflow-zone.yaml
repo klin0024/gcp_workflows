@@ -1,0 +1,48 @@
+main:
+  params: [event]
+  steps:
+  - init:
+      assign:
+      - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+      - message: ${json.decode(base64.decode(event.data.message.data))}
+      - resource_type: ${message.resource.type}
+      - internal_ip: ${message.jsonPayload.healthCheckProbeResult.ipAddress}
+  - get_global_instances: 
+      call: googleapis.compute.v1.instances.aggregatedList
+      args:
+        project: ${project_id}
+      result: global_instances
+  - for_each_zones:
+      for:
+        value: zone
+        in: ${keys(global_instances.items)}
+        steps:
+        - have_instances_key:
+            switch:
+            - condition: ${"instances" in global_instances.items[zone]}
+              steps:
+              - get_gce_instances:
+                  assign: 
+                  - gce_instances: ${global_instances.items[zone].instances}
+              - for_each_instances:
+                  for:
+                    value: instance
+                    in: ${gce_instances}
+                    steps: 
+                    - filter_instance:
+                        switch:
+                        - condition: ${instance.networkInterfaces[0].networkIP==internal_ip}
+                          steps:
+                          - get_vars:
+                              assign:
+                              - gce_name: ${instance.name}
+                              - gce_zone: ${text.split(instance.zone, "/")[8]}
+                          - reset_gce:
+                              call: googleapis.compute.v1.instances.reset
+                              args:
+                                instance: ${gce_name}
+                                project: ${project_id}
+                                zone: ${gce_zone}
+                              result: resetResult
+                          - print_result:
+                              return: ${resetResult}

@@ -1,0 +1,13 @@
+{
+	"instances":[
+		{
+			"name": "postgres1",
+			"location": "us-central1"
+		},
+		{
+			"name": "postgres2",
+			"location": "us-central1"
+		}
+	],
+	"retainDays": 7
+}

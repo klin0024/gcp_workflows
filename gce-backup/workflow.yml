@@ -1,0 +1,107 @@
+---
+main:
+  params: [event]
+  steps:
+  - init:
+      assign:
+      - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+      - instances: ${event.instances}
+      - retain_days: ${event.retainDays}
+      - current_unix_time: ${sys.now()}
+      - expiration_unix_time: ${current_unix_time - (retain_days * 86400)}
+      - current_datetime: ${time.format(current_unix_time)}
+      - time_regexp: \d{2,4}
+      - time: ${text.find_all_regex(current_datetime,time_regexp)}
+      - postfix: ${time[0].match + "-" + time[1].match + "-" + time[2].match + "-" + time[3].match + "-" + time[4].match + "-" + time[5].match}
+  - for_each_instances:
+      for:
+        value: instance
+        in: ${instances}
+        steps:
+        - get_vars:
+            assign:
+              - gce_name: ${instance.name}
+              - gce_zone: ${instance.zone}
+              - location: ${instance.location}
+              - source_instance: ${"https://www.googleapis.com/compute/v1/projects/" + project_id + "/zones/" + gce_zone + "/instances/" + gce_name}       
+        - backup:
+            try:
+              call: backup_gce_workflow
+              args:
+                project_id: ${project_id}
+                source_instance: ${source_instance}
+                location: ${location}
+                gce_name: ${gce_name}
+                postfix: ${postfix}
+            except:
+              as: e
+              steps:
+              - known_errors:
+                  switch:
+                  - condition: ${e.code == 404}
+                    call: sys.log
+                    args:
+                      text: ${instance.name + " Not Found"}
+                      severity: "ERROR"
+                  - condition: true
+                    call: sys.log
+                    args:
+                      json: ${e}
+                      severity: "ERROR"
+              - next_instance:
+                  next: continue
+        - expiration:
+            call: expiration_backup_workflow
+            args:
+              project_id: ${project_id}
+              source_instance: ${source_instance}
+              expiration_unix_time: ${expiration_unix_time}
+  - job_completed:
+      return: "job completed"
+
+backup_gce_workflow:
+  params: [project_id,source_instance,location,gce_name,postfix]
+  steps:
+  - create_gce_backup: 
+      call: googleapis.compute.v1.machineImages.insert
+      args: 
+        project: ${project_id}
+        sourceInstance: ${source_instance}
+        body:
+          name: ${gce_name + "-" + postfix}
+          storageLocations: ${location}
+      result: insertResult
+  - print_log:
+      call: sys.log
+      args:
+        json: ${insertResult}
+        severity: "NOTICE"
+
+expiration_backup_workflow:
+  params: [project_id,source_instance,expiration_unix_time]
+  steps:
+  - get_expiration_backup:
+      call: googleapis.compute.v1.machineImages.list
+      args:
+        project: ${project_id}
+      result: listResult
+  - for_each_backups:
+      for:
+        value: backup
+        in: ${listResult.items}
+        steps:
+        - filter_backup:
+            switch:
+            - condition: ${backup.sourceInstance == source_instance AND time.parse(backup.creationTimestamp) < expiration_unix_time}    
+              steps:
+              - delete_backup:
+                  call: googleapis.compute.v1.machineImages.delete
+                  args:
+                    machineImage: ${backup.name}
+                    project: ${project_id}
+                  result: deleteResult
+              - print_log:  
+                  call: sys.log
+                  args:
+                    json: ${deleteResult}
+                    severity: "NOTICE"
