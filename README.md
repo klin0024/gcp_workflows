@@ -10,12 +10,12 @@
 
 # GCE Backup
 
-### 定時備份主機
+### 排程備份主機
 ![gce-backup](images/wf-gce-backup.jpg)
 
 # CloudSQL Backup
 
-### 定時備份資料庫
+### 排程備份資料庫
 ![cloudsql-backup](images/wf-cloudsql-backup.jpg)
 
 # GCS to BigQuery
