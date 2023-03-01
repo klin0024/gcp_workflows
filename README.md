@@ -1,5 +1,6 @@
 # HealthCheck
 
+### 自動重啟故障主機
 ![healthcheck](images/wf-healthcheck.jpg)
 
 # UptimeCheck
