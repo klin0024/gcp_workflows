@@ -1,0 +1,143 @@
+main:
+  params: [event]
+  steps:
+  - init:
+      assign:
+      - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+      - build_trigger_id: 7d62872a-6dcb-4090-aa45-237f0462b249
+      - deploy_trigger_id: 47842a5a-6ee4-4761-9aa4-a5be9807060c
+      - version: ${ event.version }
+  - build:
+      try:
+        call: googleapis.cloudbuild.v1.projects.triggers.run
+        args:
+          projectId: ${ project_id }
+          triggerId: ${ build_trigger_id }
+          body:
+            branchName: master
+            substitutions:
+              _TAG_NAME: ${ version }
+        result: buildResult
+      except:
+        as: e
+        steps:
+        - build_failed:
+            call: notification
+            args:
+              subject: "Build Failed"
+              messages: ${ "Version" + ":" + event.version }
+        - build_raise:
+            raise: "Build Failed"
+  - build_log:
+      call: print_log
+      args:
+        result: ${ buildResult }
+
+  - create_callback:
+      call: events.create_callback_endpoint
+      args:
+        http_callback_method: "GET"
+      result: callback_details
+  - create_callback_log:
+      call: print_log
+      args:
+        result: ${ callback_details }
+
+  - notification_for_approval:
+      call: notification
+      args:
+        subject: Wait for Approval
+        messages: ${ callback_details.url }
+
+  - wait_for_approval:
+      try:
+        call: events.await_callback
+        args:
+          callback: ${ callback_details }
+          timeout: 3600
+        result: callback_request
+      except:
+        as: e
+        steps:
+        - reject_notification:
+            call: notification
+            args:
+              subject: "Reject"
+              messages: ${ "Version" + ":" + event.version }
+        - reject_raise:
+            raise: "Reject"  
+  - wait_for_approval_log:
+      call: print_log
+      args:
+        result: ${ callback_request }
+
+  - deploy:
+      try:
+        call: googleapis.cloudbuild.v1.projects.triggers.run
+        args:
+          projectId: ${ project_id }
+          triggerId: ${ deploy_trigger_id }
+          body:
+            branchName: master
+            substitutions:
+              _TAG_NAME: ${ version }              
+        result: deployResult
+      except:
+        as: e
+        steps:
+        - deploy_failed:
+            call: notification
+            args:
+              subject: "Deploy Failed"
+              messages: ${ "Version" + ":" + event.version }
+        - deploy_raise:
+            raise: "Deploy Failed"  
+  - deploy_log:
+      call: print_log
+      args:
+        result: ${ deployResult }
+  - deploy_success:
+      call: notification
+      args:
+        subject: "Deploy Success"
+        messages: ${ "Version" + ":" + event.version }
+
+  - result:
+      return: "Deploy Success"
+
+notification:
+  params: [subject,messages]
+  steps:
+  - init:
+      assign:
+      - api_key: < API KEY >
+      - from_email: shuhsien.lin@ikala.tv
+      - to_email: shuhsien.lin@ikala.ai
+      - subject: ${ subject }
+      - messages: ${ messages }
+  - send_email:
+      call: http.post
+      args:
+        url: https://api.sendgrid.com/v3/mail/send
+        headers:
+          Authorization: ${ "Bearer " + api_key }
+          Content-Type: application/json
+        body:
+          personalizations:
+          - to:
+            - email: ${ to_email }
+            subject: ${ subject }
+          content:
+          - type: text/plain
+            value: ${ messages }
+          from:
+            email: ${ from_email }
+
+print_log:
+  params: [result]
+  steps:
+  - log:
+      call: sys.log
+      args:
+        severity: "INFO"
+        json: ${ result }

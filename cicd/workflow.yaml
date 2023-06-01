@@ -1,0 +1,91 @@
+main:
+  params: [event]
+  steps:
+  - init:
+      assign:
+      - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+      - build_trigger_id: 7d62872a-6dcb-4090-aa45-237f0462b249
+      - deploy_trigger_id: 47842a5a-6ee4-4761-9aa4-a5be9807060c
+      - version: ${ event.version }
+  - build:
+      call: googleapis.cloudbuild.v1.projects.triggers.run
+      args:
+        projectId: ${ project_id }
+        triggerId: ${ build_trigger_id }
+        body:
+          branchName: master
+          substitutions:
+            _TAG_NAME: ${ version }
+      result: buildResult    
+  - create_callback:
+      call: events.create_callback_endpoint
+      args:
+        http_callback_method: "GET"
+      result: callback_details
+  - notification_for_approval:
+      call: notification
+      args:
+        subject: wait for approval
+        messages: ${ callback_details.url }
+  - await_callback:
+      call: events.await_callback
+      args:
+        callback: ${callback_details}
+        timeout: 3600
+      result: callback_request
+  - deploy:
+      call: googleapis.cloudbuild.v1.projects.triggers.run
+      args:
+        projectId: ${ project_id }
+        triggerId: ${ deploy_trigger_id }
+        body:
+          branchName: master
+          substitutions:
+            _TAG_NAME: ${ version }
+      result: deployResult
+  - notification_for_deploy:
+      switch:
+      - condition: ${ deployResult.done }
+        steps:
+        - deploy_success:
+            call: notification
+            args:
+              subject: "Deploy Success"
+              messages: ${ "Version" + ":" + event.version }
+      - condition: true
+        steps:
+        - deploy_failed:
+            call: notification
+            args:
+              subject: "Deploy Failed"
+              messages: ${ "Version" + ":" + event.version }
+  - result:
+      return: ${ deployResult }
+
+notification:
+  params: [subject,messages]
+  steps:
+  - init:
+      assign:
+      - api_key: < API KEY >
+      - from_email: shuhsien.lin@ikala.tv
+      - to_email: shuhsien.lin@ikala.ai
+      - subject: ${ subject }
+      - messages: ${ messages }
+  - send_email:
+      call: http.post
+      args:
+        url: https://api.sendgrid.com/v3/mail/send
+        headers:
+          Authorization: ${ "Bearer " + api_key }
+          Content-Type: application/json
+        body:
+          personalizations:
+          - to:
+            - email: ${ to_email }
+            subject: ${ subject }
+          content:
+          - type: text/plain
+            value: ${ messages }
+          from:
+            email: ${ from_email }          

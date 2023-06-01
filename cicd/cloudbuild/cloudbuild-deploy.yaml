@@ -1,0 +1,36 @@
+---
+steps:
+
+  - name: gcr.io/cloud-builders/gcloud
+    entrypoint: gcloud
+    args: ["container", "clusters", "get-credentials", "$_CLUSTER_NAME", "--zone", "$_ZONE_NAME", "--project", "$PROJECT_ID"]
+  
+  - name: gcr.io/cloud-builders/gcloud
+    entrypoint: sh
+    args:
+    - -c
+    - |
+      cd $_KUSTOMIZE_DIR
+      kustomize edit set namespace $_NAMESPACE_NAME
+      kustomize edit set label app:$_IMAGE_NAME
+      kustomize edit set image $_IMAGE_NAME=$_REGISTRY_NAME/$PROJECT_ID/$_REPO_NAME/$_IMAGE_NAME:$_TAG_NAME
+      kustomize edit set replicas $_IMAGE_NAME=$_REPLICAS
+      cat kustomization.yml
+
+  - name: gcr.io/cloud-builders/gcloud
+    entrypoint: kubectl
+    args: ["apply", "-k", "$_KUSTOMIZE_DIR"]
+
+substitutions:
+  _REGISTRY_NAME: us-central1-docker.pkg.dev
+  _REPO_NAME: demo
+  _IMAGE_NAME: spring-petclinic
+  _TAG_NAME: v1.0.00
+  _CLUSTER_NAME: cluster-1  
+  _ZONE_NAME: us-central1-c
+  _NAMESPACE_NAME: default
+  _KUSTOMIZE_DIR: kustomize
+  _REPLICAS: "3"
+
+
+timeout: 6000s  
