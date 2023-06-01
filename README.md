@@ -23,6 +23,10 @@
 ### 將 GCS數據傳送到 BigQuery
 ![gcs2bq](images/wf-gcs2bq.jpg)
 
-### CI/CD Pipeline
+# CI/CD Pipeline
+
+### CI/CD Pipeline 步驟
 ![cicd-steps](images/wf-cicd-steps.jpg)
+
+### CI/CD Pipeline 組件
 ![cicd-components](images/wf-cicd-components.jpg)
