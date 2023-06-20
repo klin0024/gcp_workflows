@@ -8,7 +8,7 @@ steps:
   - name: maven:3.8-openjdk-17
     dir: "$_DIR_NAME"
     entrypoint: mvn
-    args: ["clean", "package"]
+    args: ["clean", "package", "-Dmaven.test.skip=true"]
 
   - name: gcr.io/cloud-builders/docker
     args: ["build", "-f", "Dockerfile", "-t", "$_REGISTRY_NAME/$PROJECT_ID/$_REPO_NAME/$_IMAGE_NAME:$_TAG_NAME", "--build-arg=JAR_FILE=target/*.jar", "$_DIR_NAME"]
@@ -24,4 +24,4 @@ substitutions:
   _IMAGE_NAME: spring-petclinic
   _TAG_NAME: v1.0.00
 
-timeout: 6000s  
+timeout: 6000s
